@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", monospace;
+
+  --color-paper: #f4f1ea;
+  --color-paper-soft: #ece8de;
+  --color-card: #fdfcf9;
+  --color-border: #e4dfd3;
+
+  --color-ink: #23201a;
+  --color-ink-soft: #6b6458;
+  --color-ink-faint: #9a9183;
+
+  --color-ember: #b3441a;
+  --color-ember-deep: #96370f;
+  --color-ember-soft: #f3e2d8;
+
+  --color-night: #15130e;
+  --color-night-card: #1e1a13;
+  --color-night-border: #30291e;
+  --color-night-ink: #ece7dd;
+}
+
+.dark {
+  --color-paper: #15130e;
+  --color-paper-soft: #1b1812;
+  --color-card: #1e1a13;
+  --color-border: #30291e;
+
+  --color-ink: #ece7dd;
+  --color-ink-soft: #a89f91;
+  --color-ink-faint: #77715f;
+
+  --color-ember: #e8743d;
+  --color-ember-deep: #f08a55;
+  --color-ember-soft: #2a1b12;
+}
+
+html {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background-color: var(--color-ember);
+  color: var(--color-card);
+}
+
+:where(button, input, textarea) {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-ember);
+  outline-offset: 2px;
+}
+
+::placeholder {
+  color: var(--color-ink-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
