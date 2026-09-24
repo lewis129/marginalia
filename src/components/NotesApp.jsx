@@ -1,19 +1,31 @@
 import { useMemo, useState } from 'react'
 import {
+  Archive,
   MagnifyingGlass,
   Moon,
   NotePencil,
   Plus,
+  PushPinSimple,
   SignOut,
   Sun,
+  Timer,
 } from '@phosphor-icons/react'
+import { useToast } from 'cite-ui'
 import { useAuth } from '../context/AuthContext'
 import { useNotes } from '../hooks/useNotes'
 import { useTheme } from '../hooks/useTheme'
-import { greeting } from '../lib/format'
+import { dueSoon, greeting, parseDue, pbError } from '../lib/format'
+import { stripMarkdown } from '../lib/markdown'
 import BrandMark from './BrandMark'
 import NoteCard from './NoteCard'
 import NoteEditor from './NoteEditor'
+
+const VIEWS = [
+  { id: 'active', label: 'Active', icon: NotePencil },
+  { id: 'upcoming', label: 'Upcoming', icon: Timer },
+  { id: 'pinned', label: 'Pinned', icon: PushPinSimple },
+  { id: 'archived', label: 'Archived', icon: Archive },
+]
 
 function SkeletonCard() {
   return (
@@ -28,23 +40,88 @@ function SkeletonCard() {
   )
 }
 
+function EmptyBlock({ title, body, cta, onClick }) {
+  return (
+    <div className="rounded-3xl border border-dashed border-border bg-paper-soft/50 px-8 py-16 text-center">
+      <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-ember-soft text-ember-deep">
+        <NotePencil size={26} weight="regular" />
+      </span>
+      <h3 className="mt-5 text-lg font-medium">{title}</h3>
+      <p className="mx-auto mt-1 max-w-sm text-sm text-ink-soft">{body}</p>
+      {cta && (
+        <button
+          type="button"
+          onClick={onClick}
+          className="mt-6 inline-flex items-center gap-2 rounded-full bg-ember px-5 py-2.5 text-sm font-medium text-card transition hover:brightness-95 active:scale-[0.98]"
+        >
+          <Plus size={18} weight="bold" />
+          {cta}
+        </button>
+      )}
+    </div>
+  )
+}
+
 export default function NotesApp() {
   const { user, logout } = useAuth()
   const { notes, error, createNote, updateNote, removeNote } = useNotes(user)
   const { dark, toggle } = useTheme()
+  const { toast } = useToast()
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState(null)
+  const [view, setView] = useState('active')
+  const [tag, setTag] = useState(null)
+
+  const allTags = useMemo(() => {
+    const set = new Set()
+    ;(notes ?? []).forEach((n) => (n.tags || []).forEach((t) => set.add(t)))
+    return [...set].sort()
+  }, [notes])
+
+  const counts = useMemo(() => {
+    if (!notes) return {}
+    return {
+      active: notes.filter((n) => !n.archived).length,
+      upcoming: notes.filter((n) => !n.archived && dueSoon(n.due)).length,
+      pinned: notes.filter((n) => !n.archived && n.pinned).length,
+      archived: notes.filter((n) => n.archived).length,
+    }
+  }, [notes])
 
   const filtered = useMemo(() => {
     if (!notes) return null
+    let list = notes.slice()
+
+    if (view === 'archived') {
+      list = list.filter((n) => n.archived)
+    } else {
+      list = list.filter((n) => !n.archived)
+      if (view === 'pinned') list = list.filter((n) => n.pinned)
+      if (view === 'upcoming') list = list.filter((n) => dueSoon(n.due))
+    }
+
+    if (tag) list = list.filter((n) => (n.tags || []).includes(tag))
+
     const q = query.trim().toLowerCase()
-    if (!q) return notes
-    return notes.filter(
-      (n) =>
-        (n.title || '').toLowerCase().includes(q) ||
-        (n.body || '').toLowerCase().includes(q)
-    )
-  }, [notes, query])
+    if (q) {
+      list = list.filter(
+        (n) =>
+          (n.title || '').toLowerCase().includes(q) ||
+          stripMarkdown(n.body || '').toLowerCase().includes(q)
+      )
+    }
+
+    list.sort((a, b) => {
+      if (!!a.pinned !== !!b.pinned) return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)
+      const ad = parseDue(a.due)
+      const bd = parseDue(b.due)
+      if (ad && bd) return ad - bd
+      if (ad) return -1
+      if (bd) return 1
+      return String(b.updated || '').localeCompare(String(a.updated || ''))
+    })
+    return list
+  }, [notes, view, tag, query])
 
   const displayName = user?.email?.split('@')[0] || 'reader'
   const initials = user?.email?.charAt(0)?.toUpperCase() || '?'
@@ -55,23 +132,67 @@ export default function NotesApp() {
       return
     }
     const record = await createNote(draft)
-    setEditing({ id: record.id, title: record.title, body: record.body })
+    setEditing(record)
+    toast.success('Saved to the margins')
   }
 
   async function handleDelete(note) {
-    if (note?.id) {
-      await removeNote(note.id)
+    if (!note?.id) {
+      setEditing(null)
+      return
     }
-    if (editing?.id === note?.id) {
-      setEditing(null)
-    } else if (!note?.id) {
-      setEditing(null)
+    try {
+      await removeNote(note.id)
+      if (editing?.id === note?.id) setEditing(null)
+      toast.success('Note deleted')
+    } catch (e) {
+      toast.error(`Could not delete: ${pbError(e)}`)
+    }
+  }
+
+  async function handlePin(note) {
+    const next = !note.pinned
+    try {
+      await updateNote(note.id, { pinned: next })
+      toast.success(next ? 'Pinned to the top' : 'Unpinned')
+    } catch (e) {
+      toast.error(`Could not pin: ${pbError(e)}`)
+    }
+  }
+
+  async function handleArchive(note) {
+    const next = !note.archived
+    try {
+      await updateNote(note.id, { archived: next })
+      toast.success(next ? 'Archived' : 'Restored from archive')
+    } catch (e) {
+      toast.error(`Could not archive: ${pbError(e)}`)
     }
   }
 
   function newNote() {
-    setEditing({ id: null, title: '', body: '' })
+    setEditing({ id: null, title: '', body: '', tags: [], pinned: false, archived: false, due: null })
   }
+
+  const empty = {
+    active: {
+      title: 'No notes yet',
+      body: 'Your margin starts empty. Capture the first thought worth keeping.',
+      cta: 'Start writing',
+    },
+    upcoming: {
+      title: 'Nothing due soon',
+      body: 'Notes with a due date in the next week (including overdue ones) gather here.',
+    },
+    pinned: {
+      title: 'Nothing pinned',
+      body: 'Pin the notes you want to keep at the top of the page.',
+    },
+    archived: {
+      title: 'Archive is empty',
+      body: 'Notes you archive rest here, out of the way until you restore them.',
+    },
+  }[view]
 
   return (
     <div className="min-h-[100dvh]">
@@ -152,6 +273,55 @@ export default function NotesApp() {
           </button>
         </div>
 
+        {notes && notes.length > 0 && (
+          <div className="mb-5 flex flex-wrap items-center gap-2">
+            {VIEWS.map((v) => {
+              const active = view === v.id
+              return (
+                <button
+                  key={v.id}
+                  type="button"
+                  onClick={() => setView(v.id)}
+                  aria-pressed={active}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm font-medium transition active:scale-[0.98] ${
+                    active
+                      ? 'border-ember bg-ember text-card'
+                      : 'border-border bg-card text-ink-soft hover:text-ink'
+                  }`}
+                >
+                  <v.icon size={14} weight={active ? 'fill' : 'regular'} />
+                  {v.label}
+                  <span className={`font-mono text-[10px] ${active ? 'text-card/80' : 'text-ink-faint'}`}>
+                    {counts[v.id] ?? 0}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {allTags.length > 0 && (
+          <div className="mb-6 flex flex-wrap items-center gap-2">
+            <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink-faint">Tags</span>
+            {allTags.map((t) => {
+              const on = tag === t
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setTag(on ? null : t)}
+                  aria-pressed={on}
+                  className={`rounded-full border px-2.5 py-1 font-mono text-xs transition active:scale-[0.98] ${
+                    on ? 'border-ember bg-ember text-card' : 'border-border bg-card text-ink-soft hover:text-ink'
+                  }`}
+                >
+                  #{t}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
         {error && (
           <p role="alert" className="mb-6 rounded-2xl border border-ember/20 bg-ember-soft px-4 py-3 text-sm text-ember-deep">
             Could not load notes: {error}
@@ -180,23 +350,7 @@ export default function NotesApp() {
               </button>
             </div>
           ) : (
-            <div className="rounded-3xl border border-dashed border-border bg-paper-soft/50 px-8 py-16 text-center">
-              <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-ember-soft text-ember-deep">
-                <NotePencil size={26} weight="regular" />
-              </span>
-              <h3 className="mt-5 text-lg font-medium">No notes yet</h3>
-              <p className="mx-auto mt-1 max-w-sm text-sm text-ink-soft">
-                Your margin starts empty. Capture the first thought worth keeping.
-              </p>
-              <button
-                type="button"
-                onClick={newNote}
-                className="mt-6 inline-flex items-center gap-2 rounded-full bg-ember px-5 py-2.5 text-sm font-medium text-card transition hover:brightness-95 active:scale-[0.98]"
-              >
-                <Plus size={18} weight="bold" />
-                Start writing
-              </button>
-            </div>
+            <EmptyBlock {...empty} onClick={newNote} />
           )
         ) : (
           <div className="columns-1 gap-5 sm:columns-2 xl:columns-3">
@@ -204,8 +358,11 @@ export default function NotesApp() {
               <NoteCard
                 key={note.id}
                 note={note}
-                onOpen={(n) => setEditing({ id: n.id, title: n.title, body: n.body })}
+                query={query}
+                onOpen={(n) => setEditing(n)}
                 onDelete={handleDelete}
+                onPin={handlePin}
+                onArchive={handleArchive}
               />
             ))}
           </div>
@@ -215,6 +372,7 @@ export default function NotesApp() {
       {editing && (
         <NoteEditor
           note={editing}
+          suggestedTags={allTags}
           onSave={handleSave}
           onDelete={handleDelete}
           onClose={() => setEditing(null)}

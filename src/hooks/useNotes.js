@@ -35,11 +35,22 @@ export function useNotes(user) {
     }
   }, [user, load])
 
-  const createNote = useCallback(async ({ title, body }) => {
-    const record = await pb.collection('notes').create({ title, body, author: user.id })
-    setNotes((prev) => [record, ...(prev ?? []).filter((n) => n.id !== record.id)])
-    return record
-  }, [user])
+  const createNote = useCallback(
+    async ({ title, body, tags = [], pinned = false, archived = false, due = null }) => {
+      const record = await pb.collection('notes').create({
+        title,
+        body,
+        author: user.id,
+        tags,
+        pinned,
+        archived,
+        due,
+      })
+      setNotes((prev) => [record, ...(prev ?? []).filter((n) => n.id !== record.id)])
+      return record
+    },
+    [user]
+  )
 
   const updateNote = useCallback(async (id, patch) => {
     const record = await pb.collection('notes').update(id, patch)

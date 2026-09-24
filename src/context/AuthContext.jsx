@@ -15,7 +15,8 @@ export function AuthProvider({ children }) {
     ;(async () => {
       if (pb.authStore.isValid) {
         try {
-          setUser(await pb.collection('users').authRefresh())
+          const res = await pb.collection('users').authRefresh()
+          setUser(res.record ?? null)
         } catch {
           pb.authStore.clear()
         }

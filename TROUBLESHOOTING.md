@@ -66,6 +66,24 @@ See `pb_migrations/1790268362_secure_notes_rules.js` for the migration that appl
 
 ---
 
+## Symptom: saving fails with "Could not save" *only right after adding tags / pinning / archiving*
+
+The frontend now writes four more fields (`tags`, `pinned`, `archived`, `due`) that the running PocketBase **doesn't have yet**. Saving a record with unknown fields errors.
+
+**Fix:** apply the schema migration on the server PC. Copy `pb_migrations/1790272347_notes_extra_features.js` into the server's `pb_migrations/` folder, then either:
+
+```powershell
+pocketbase serve    # applies unapplied migrations automatically on start
+# or, if serve is already running:
+pocketbase migrate up
+```
+
+Alternative (no file needed): add the fields manually in the PB Dashboard under **Collections → notes → Edit** (multi-select "tags", booleans "pinned"/"archived", date "due"). With `--automigrate` on, the Dashboard writes the migration file for you.
+
+Verify from the browser: open a note, toggle Pin, and the toast "Pinned to the top" should appear.
+
+---
+
 ## Symptom: anonymous visitors can read/write your notes
 
 Confirms rules are missing. Test anonymously:

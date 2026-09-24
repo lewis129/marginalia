@@ -8,6 +8,7 @@ A private, account-based notes app built on React + PocketBase.
 |---|---|
 | Frontend | React 19, Vite 8, JSX, Tailwind CSS v4, Motion-ready CSS |
 | Icons / fonts | Phosphor icons, Geist + Geist Mono (self-hosted via fontsource) |
+| UI kit | `cite-ui` (local component library — toasts), `marked` + `dompurify` (markdown render) |
 | Backend | PocketBase (self-hosted, single Go binary + SQLite) |
 | Backend SDK | `pocketbase` JavaScript SDK (v0.28) |
 | Hosting | Vercel (frontend), local network PC (PocketBase), Cloudflare Tunnel (public access) |
@@ -43,20 +44,22 @@ The tunnel is **outbound-only**: the dev PC connects to Cloudflare, so no router
 ```
 src/
 ├── main.jsx                  entry, fonts, CSS
-├── App.jsx                   AuthProvider + auth gate (loading → app or auth page)
+├── App.jsx                   ToastProvider + AuthProvider + gate (loading → app | home | auth)
 ├── lib/
 │   ├── pocketbase.js         PocketBase client (URL from VITE_POCKETBASE_URL)
-│   └── format.js             date / greeting / error helpers
+│   ├── format.js             date / due-date / greeting / error helpers
+│   └── markdown.js           markdown → sanitized HTML, plain-text stripping
 ├── context/
 │   └── AuthContext.jsx       user state, register/login/logout, authRefresh
 ├── hooks/
 │   ├── useNotes.js           notes state + CRUD + realtime subscription
 │   └── useTheme.js           dark/light theme (system-aware + toggle)
 └── components/
-    ├── AuthPage.jsx          sign in / create account
-    ├── NotesApp.jsx          app shell: header, search, masonry grid, editor
-    ├── NoteCard.jsx          note tile with two-step delete
-    ├── NoteEditor.jsx        overlay editor with debounced autosave
+    ├── HomePage.jsx          landing page for visitors (hero, features, steps, CTAs)
+    ├── AuthPage.jsx          sign in / create account (initialMode + back link)
+    ├── NotesApp.jsx          app shell: header, search, views, tag filter, masonry grid, editor
+    ├── NoteCard.jsx          note tile: pin/archive actions, tags, due badge, search highlight
+    ├── NoteEditor.jsx        overlay editor: autosave, tags, pin/archive, due date, markdown preview
     └── BrandMark.jsx         inline SVG logo
 ```
 
@@ -65,9 +68,13 @@ Key patterns:
 - **Single client instance.** One `PocketBase` client is created in `lib/pocketbase.js`; `autoCancellation(false)` prevents "Client canceled" errors.
 - **Auth state is reactive.** `AuthContext` listens to `pb.authStore.onChange(...)`, so login/logout propagate automatically to the UI. On first load it calls `authRefresh()` to validate a stored session.
 - **Auth session persistence.** The SDK's default `LocalAuthStore` persists the JWT to `localStorage` in the browser.
-- **Protected surface.** `App.jsx` renders the app only when `user` exists; the auth pages otherwise.
+- **Protected surface.** `App.jsx` renders the app only when `user` exists. Visitors get a landing page (`HomePage`) with CTAs that open the auth screen pre-selected to sign-in or create-account; a "Home" link returns them.
 - **Debounced autosave.** `NoteEditor` flushes changes ~700ms after the last keystroke; create/update run through `useNotes`.
 - **Realtime.** `useNotes` subscribes to `notes` (`*` event) and reloads the list on remote changes — edits in one tab appear in others.
+- **Toasts.** `App.jsx` wraps the app in `cite-ui`'s `ToastProvider`; actions (deleted, pinned, archived, created) and failures fire `useToast()` notifications top-right.
+- **Views & tags.** `NotesApp` filters client-side by view (Active / Upcoming / Pinned / Archived), a single tag, and the search query; pinned-first ordering with due dates next.
+- **Markdown.** `lib/markdown.js` renders `marked` output through `DOMPurify` (XSS-safe) for the editor's Preview mode; card snippets strip markup to plain text.
+- **Search highlight.** `NoteCard` highlights query matches in the title and snippet using `HighlightText`.
 
 ## Backend: collections
 
@@ -79,11 +86,15 @@ Key patterns:
 | Field | Type | Notes |
 |---|---|---|
 | `title` | text | optional |
-| `body` | text | stored as plain text (`textarea` editor) |
+| `body` | text | plain text authored in the editor; **markdown** renders in Preview mode |
 | `author` | relation → users | required, single-select |
+| `tags` | select (multi, custom allowed) | e.g. idea / todo / project / reference / question / random + custom |
+| `pinned` | bool | pinned notes sort to the top |
+| `archived` | bool | archived notes leave the default view |
+| `due` | date | optional due date; drives the Upcoming view + card badge |
 | `created` / `updated` | autodate | system fields |
 
-Schema + rules are captured in `pb_migrations/1790268362_secure_notes_rules.js`.
+Schema + rules are captured in `pb_migrations/1790268362_secure_notes_rules.js`; the extra fields (`tags`, `pinned`, `archived`, `due`) in `pb_migrations/1790272347_notes_extra_features.js`. Apply both on the server PC with `pocketbase serve` (auto) or `./pocketbase migrate up`.
 
 ## Access rules (the security model)
 
@@ -149,4 +160,4 @@ The value differs by environment:
 - No SMTP configured yet — password reset / email verification / OTP flows are wired in the SDK but need `Settings → Mail`.
 - OAuth2 (Google) not wired.
 - CORS is currently open (`*`); restrict origins to the app's domain once the URL is stable.
-- `notes.body` is plain text — could move to markdown/rich-text later.
+- Markdown is render-only in the editor (Preview) — no full rich-text editing, version history, or attachments yet.

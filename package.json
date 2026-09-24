@@ -12,6 +12,9 @@
     "@fontsource-variable/geist": "^5.3.0",
     "@fontsource-variable/geist-mono": "^5.3.0",
     "@phosphor-icons/react": "^2.1.10",
+    "cite-ui": "file:../projects/framestudio/cite-ui",
+    "dompurify": "^3.4.16",
+    "marked": "^18.0.14",
     "pocketbase": "^0.28.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"

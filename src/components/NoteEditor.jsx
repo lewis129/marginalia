@@ -1,23 +1,66 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, Trash } from '@phosphor-icons/react'
-import { formatDate } from '../lib/format'
+import {
+  Archive,
+  ArrowLeft,
+  CalendarBlank,
+  Eye,
+  PencilSimple,
+  PushPinSimple,
+  Trash,
+  X,
+} from '@phosphor-icons/react'
+import { useToast } from 'cite-ui'
+import { formatDate, pbError } from '../lib/format'
+import { renderMarkdown } from '../lib/markdown'
 
-export default function NoteEditor({ note, onSave, onDelete, onClose }) {
+function ToolButton({ active, on, label, children }) {
+  return (
+    <button
+      type="button"
+      onClick={on}
+      aria-pressed={active}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition active:scale-95 ${
+        active
+          ? 'border-ember bg-ember text-card'
+          : 'border-border bg-card text-ink-soft hover:text-ink'
+      }`}
+    >
+      {children}
+      {label}
+    </button>
+  )
+}
+
+export default function NoteEditor({ note, suggestedTags = [], onSave, onDelete, onClose }) {
+  const { toast } = useToast()
   const [title, setTitle] = useState(note?.title ?? '')
   const [body, setBody] = useState(note?.body ?? '')
+  const [tags, setTags] = useState(Array.isArray(note?.tags) ? note.tags : [])
+  const [pinned, setPinned] = useState(Boolean(note?.pinned))
+  const [archived, setArchived] = useState(Boolean(note?.archived))
+  const [due, setDue] = useState(note?.due ? String(note.due).slice(0, 10) : '')
+  const [tagInput, setTagInput] = useState('')
+  const [preview, setPreview] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [status, setStatus] = useState('saved')
   const [saveError, setSaveError] = useState('')
   const [armed, setArmed] = useState(false)
-  const latest = useRef({ title, body })
+  const latest = useRef({ title, body, tags, pinned, archived, due })
   const bodyRef = useRef(null)
-  latest.current = { title, body }
+  latest.current = { title, body, tags, pinned, archived, due }
 
   useEffect(() => {
     setTitle(note?.title ?? '')
     setBody(note?.body ?? '')
+    setTags(Array.isArray(note?.tags) ? note.tags : [])
+    setPinned(Boolean(note?.pinned))
+    setArchived(Boolean(note?.archived))
+    setDue(note?.due ? String(note.due).slice(0, 10) : '')
+    setTagInput('')
+    setPreview(false)
     setDirty(false)
     setStatus('saved')
+    setSaveError('')
   }, [note?.id])
 
   useEffect(() => {
@@ -32,18 +75,19 @@ export default function NoteEditor({ note, onSave, onDelete, onClose }) {
         console.error('marginalia save failed:', err)
         setStatus('error')
         setSaveError(err?.message || JSON.stringify(err))
+        toast.error(`Could not save: ${pbError(err)}`)
       }
       setDirty(false)
     }, 700)
     return () => window.clearTimeout(t)
-  }, [dirty])
+  }, [dirty, onSave, toast])
 
   useEffect(() => {
     const el = bodyRef.current
-    if (!el) return
+    if (!el || preview) return
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, 600)}px`
-  }, [body, note?.id])
+  }, [body, preview, note?.id])
 
   const closeRef = useRef(null)
   async function close() {
@@ -66,6 +110,16 @@ export default function NoteEditor({ note, onSave, onDelete, onClose }) {
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
+  function togglePinned() {
+    setPinned((p) => !p)
+    setDirty(true)
+  }
+
+  function toggleArchived() {
+    setArchived((a) => !a)
+    setDirty(true)
+  }
+
   function handleDelete() {
     if (!armed) {
       setArmed(true)
@@ -73,6 +127,18 @@ export default function NoteEditor({ note, onSave, onDelete, onClose }) {
       return
     }
     onDelete(note)
+  }
+
+  function addTag(raw) {
+    const t = raw
+      .trim()
+      .replace(/^#/, '')
+      .replace(/[\s,]+/g, '-')
+      .toLowerCase()
+    if (!t) return
+    setTags((prev) => (prev.includes(t) ? prev : [...prev, t].slice(0, 8)))
+    setTagInput('')
+    setDirty(true)
   }
 
   return (
@@ -114,14 +180,85 @@ export default function NoteEditor({ note, onSave, onDelete, onClose }) {
           </button>
         </div>
 
-        <div className="flex items-center gap-2 px-5 pb-1 pt-4 font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-5 py-2">
+          <ToolButton
+            active={preview}
+            on={() => setPreview((p) => !p)}
+            label={preview ? 'Write' : 'Preview'}
+          >
+            {preview ? <PencilSimple size={14} weight="regular" /> : <Eye size={14} weight="regular" />}
+          </ToolButton>
+          <ToolButton active={pinned} on={togglePinned} label={pinned ? 'Pinned' : 'Pin'}>
+            <PushPinSimple size={14} weight={pinned ? 'fill' : 'regular'} />
+          </ToolButton>
+          <ToolButton active={archived} on={toggleArchived} label={archived ? 'Archived' : 'Archive'}>
+            <Archive size={14} weight={archived ? 'fill' : 'regular'} />
+          </ToolButton>
+          <label className="ml-1 inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-ink-soft">
+            <CalendarBlank size={14} weight="regular" />
+            <input
+              type="date"
+              value={due}
+              onChange={(e) => {
+                setDue(e.target.value)
+                setDirty(true)
+              }}
+              aria-label="Due date"
+              className="w-28 bg-transparent text-xs outline-none [color-scheme:inherit]"
+            />
+          </label>
+
+          <div className="ml-auto flex flex-wrap items-center gap-1.5">
+            {tags.map((t) => (
+              <span
+                key={t}
+                className="inline-flex items-center gap-1 rounded-full bg-ember-soft px-2 py-0.5 font-mono text-[11px] text-ember-deep"
+              >
+                #{t}
+                <button
+                  type="button"
+                  aria-label={`Remove tag ${t}`}
+                  onClick={() => {
+                    setTags((prev) => prev.filter((x) => x !== t))
+                    setDirty(true)
+                  }}
+                  className="transition-colors hover:text-ember active:scale-95"
+                >
+                  <X size={11} weight="bold" />
+                </button>
+              </span>
+            ))}
+            <input
+              type="text"
+              value={tagInput}
+              list="marginalia-tags"
+              onChange={(e) => setTagInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ',') {
+                  e.preventDefault()
+                  addTag(e.currentTarget.value)
+                }
+              }}
+              onBlur={() => tagInput && addTag(tagInput)}
+              placeholder={tags.length === 0 ? 'Add a tag…' : '…'}
+              aria-label="Add a tag"
+              className="w-24 bg-transparent font-mono text-xs outline-none placeholder:text-ink-faint"
+            />
+            <datalist id="marginalia-tags">
+              {suggestedTags
+                .filter((t) => !tags.includes(t))
+                .map((t) => (
+                  <option key={t} value={t} />
+                ))}
+            </datalist>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 px-5 pb-1 pt-3 font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint">
           <span>{body.length} characters</span>
           <span aria-hidden="true">·</span>
           <span>{formatDate(note?.updated)}</span>
-          <span
-            className="ml-auto flex items-center gap-1.5"
-            role="status"
-          >
+          <span className="ml-auto flex items-center gap-1.5" role="status">
             <span
               className={`h-1.5 w-1.5 rounded-full ${
                 status === 'error'
@@ -136,17 +273,26 @@ export default function NoteEditor({ note, onSave, onDelete, onClose }) {
           </span>
         </div>
 
-        <textarea
-          ref={bodyRef}
-          value={body}
-          onChange={(e) => {
-            setBody(e.target.value)
-            setDirty(true)
-          }}
-          placeholder="Start writing in the margins…"
-          aria-label="Note body"
-          className="flex-1 resize-none overflow-y-auto bg-transparent px-5 py-3 text-[15px] leading-relaxed outline-none placeholder:text-ink-faint"
-        />
+        {preview ? (
+          <div className="flex-1 overflow-y-auto px-5 py-3 text-[15px]">
+            <div
+              className="prose-marginalia"
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }}
+            />
+          </div>
+        ) : (
+          <textarea
+            ref={bodyRef}
+            value={body}
+            onChange={(e) => {
+              setBody(e.target.value)
+              setDirty(true)
+            }}
+            placeholder="Start writing in the margins… Markdown works: **bold**, `code`, lists, # headings"
+            aria-label="Note body"
+            className="flex-1 resize-none overflow-y-auto bg-transparent px-5 py-3 text-[15px] leading-relaxed outline-none placeholder:text-ink-faint"
+          />
+        )}
       </div>
     </div>
   )

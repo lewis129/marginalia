@@ -1,11 +1,12 @@
 import { useState } from 'react'
+import { ArrowLeft } from '@phosphor-icons/react'
 import { useAuth } from '../context/AuthContext'
 import { errorMessage } from '../lib/format'
 import BrandMark from './BrandMark'
 
-export default function AuthPage() {
+export default function AuthPage({ initialMode = 'signin', onBack }) {
   const { login, register } = useAuth()
-  const [mode, setMode] = useState('signin')
+  const [mode, setMode] = useState(initialMode)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -76,6 +77,17 @@ export default function AuthPage() {
           <BrandMark className="h-9 w-9" />
           <span className="text-lg font-semibold tracking-tight">Marginalia</span>
         </div>
+
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            className="mb-6 inline-flex items-center gap-1.5 self-start font-mono text-[11px] uppercase tracking-[0.14em] text-ink-faint transition hover:text-ember"
+          >
+            <ArrowLeft size={13} weight="regular" />
+            Home
+          </button>
+        )}
 
         <div className="mx-auto w-full max-w-sm self-center">
           <div className="mb-8">
